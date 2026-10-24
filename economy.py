@@ -5,7 +5,7 @@ economy.py - PERSON A - answers "SHOULD we?"
 Never looks at the map layout. Only money (bank iron, worker prices) and time (turn number).
 
 THE PLAN
-  EARLY game (until we have EARLY_WORKER_TARGET workers OR turn EARLY_END_TURN):
+  EARLY game (until 4 workers; keeps going for a 5th until turn BONUS_DEADLINE_TURN):
       - spend ALL iron on workers, no reserve
       - one base allowed early (the edge base) when a worker can't be afforded
       - mine iron first
@@ -32,8 +32,11 @@ from __future__ import annotations
 from common import BASE_COST, MAX_TURNS, home_distance, inventory, pos_of, state, worker_cost
 
 # ======================= KNOBS (change ONE at a time when testing) =======================
-EARLY_WORKER_TARGET = 4     # early game ends when we have this many workers...
-EARLY_END_TURN = 100        # ...or at this turn, whichever comes first
+MUST_HAVE_WORKERS = 4       # early game lasts until we have at least this many workers...
+BONUS_WORKERS = 5           # ...and keeps going for one more worker...
+BONUS_DEADLINE_TURN = 80    # ...only until this turn
+DEBUG_EARLY_TURNS = 20      # print status every turn up to here
+DEBUG_EVERY = 10            # then every N turns
 EARLY_MAX_BASES = 1         # bases allowed during early game (the edge base)
 
 WORKER_PAYBACK_DIVISOR = 6  # mid game: buy a worker only if cost < turns_left / this
@@ -62,7 +65,10 @@ def _base_count(s) -> int:
 def phase(view, me) -> str:
     """'early' or 'mid'. End game is decided per worker by is_game_ending()."""
     s = state(view, me)
-    if s["turn"] < EARLY_END_TURN and len(s["my_workers"]) < EARLY_WORKER_TARGET:
+    n = len(s["my_workers"])
+    if n < MUST_HAVE_WORKERS:
+        return "early"
+    if n < BONUS_WORKERS and s["turn"] < BONUS_DEADLINE_TURN:
         return "early"
     return "mid"
 
@@ -135,6 +141,32 @@ def iron_wanted(view, me, iron_left) -> bool:
     if _worker_worth_it(s):
         return have < worker_cost(_workers_bought(s)) + IRON_RESERVE
     return have < BASE_COST and _base_count(s) < MAX_BASES
+
+
+def should_return_with_iron(view, me, worker, iron_left) -> bool:
+    """
+    EARLY only: go bank iron as soon as (carried iron + bank iron) buys the next worker,
+    instead of waiting until the bag is full.
+    """
+    if phase(view, me) != "early":
+        return False
+    _, iron = inventory(worker)
+    if iron == 0:
+        return False
+    s = state(view, me)
+    if pos_of(worker) in s["my_base_set"]:
+        return False   # already home; the master deposits
+    return iron + iron_left >= worker_cost(_workers_bought(s))
+
+
+def debug_status(view, me) -> None:
+    """Prints one status line: every turn early, then every DEBUG_EVERY turns."""
+    s = state(view, me)
+    t = s["turn"]
+    if t <= DEBUG_EARLY_TURNS or t % DEBUG_EVERY == 0:
+        print(f"[econ] turn {t} | phase {phase(view, me)} | bank iron {s['bank_iron']} "
+              f"gold {s['bank_gold']} | workers {len(s['my_workers'])} "
+              f"| bases {len(s['my_bases'])} | next worker costs {worker_cost(_workers_bought(s))}")
 
 
 def should_trade_iron(view, me, worker) -> bool:
